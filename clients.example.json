@@ -1,0 +1,20 @@
+{
+  "clients": [
+    {
+      "id": "kake-bo",
+      "secretSha256": "generate-client-secret の secretSha256 を書く",
+      "passkey": {
+        "rpId": "money.example.com",
+        "origins": ["https://money.example.com"]
+      }
+    },
+    {
+      "id": "kmp-activitypub",
+      "secretSha256": "generate-client-secret の secretSha256 を書く",
+      "passkey": {
+        "rpId": "social.example.com",
+        "origins": ["https://social.example.com"]
+      }
+    }
+  ]
+}
