@@ -69,7 +69,14 @@ class PasskeyService(
                     attestedCredentialData = passkey.attestedCredentialData,
                     storedSignCount = passkey.signCount,
                 )
-            passkeyRepository.updateSignCount(credentialId = credentialId, signCount = signCount, usedAt = clock.instant())
+            val updated =
+                passkeyRepository.updateSignCount(
+                    credentialId = credentialId,
+                    expectedSignCount = passkey.signCount,
+                    signCount = signCount,
+                    usedAt = clock.instant(),
+                )
+            if (!updated) throw PasskeyVerificationException("同じパスキーのログインが同時に通った")
             owner.id
         }
 

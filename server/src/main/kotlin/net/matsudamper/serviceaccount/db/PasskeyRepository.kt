@@ -115,20 +115,26 @@ class PasskeyRepository(
             }
         }
 
+    /**
+     * 同じパスキーのログインが同時に通ったときに回数を戻さないよう、検証に使った [expectedSignCount] のままのときだけ更新する
+     *
+     * @return 更新したら true。他のログインが先に更新していたら false
+     */
     fun updateSignCount(
         credentialId: String,
+        expectedSignCount: Long,
         signCount: Long,
         usedAt: Instant,
-    ) {
+    ): Boolean =
         database.transaction { connection ->
-            connection.prepareStatement("UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE credential_id = ?").use { statement ->
+            connection.prepareStatement("UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE credential_id = ? AND sign_count = ?").use { statement ->
                 statement.setLong(1, signCount)
                 statement.setLong(2, usedAt.toEpochMilli())
                 statement.setString(3, credentialId)
-                statement.executeUpdate()
+                statement.setLong(4, expectedSignCount)
+                statement.executeUpdate() > 0
             }
         }
-    }
 
     /**
      * パスワードが無いときに最後のパスキーを消すとログインできなくなるので消さない

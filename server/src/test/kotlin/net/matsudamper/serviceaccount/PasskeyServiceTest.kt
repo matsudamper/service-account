@@ -1,8 +1,11 @@
 package net.matsudamper.serviceaccount
 
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import net.matsudamper.serviceaccount.client.RegisteredClient
 import net.matsudamper.serviceaccount.logic.PasskeyService
 import net.matsudamper.serviceaccount.passkey.PasskeyRelyingParty
@@ -27,5 +30,16 @@ class PasskeyServiceTest {
         listOf("{}", "not json", """{"id":"AA","rawId":"AA","type":"public-key","response":{}}""").forEach { credentialJson ->
             assertNull(fixture.passkeyService.login(client, credentialJson))
         }
+    }
+
+    @Test
+    fun 署名回数は検証に使った値のままのときだけ更新する() {
+        val fixture = TestFixture()
+        val userId = fixture.addUser()
+        fixture.passkeyRepository.add(userId, "example.com", "credential", byteArrayOf(1), 10, "key", Instant.EPOCH)
+
+        assertTrue(fixture.passkeyRepository.updateSignCount("credential", expectedSignCount = 10, signCount = 12, usedAt = Instant.EPOCH))
+        assertFalse(fixture.passkeyRepository.updateSignCount("credential", expectedSignCount = 10, signCount = 11, usedAt = Instant.EPOCH))
+        assertEquals(12, fixture.passkeyRepository.find("credential", "example.com")?.signCount)
     }
 }
