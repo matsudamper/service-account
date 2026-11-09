@@ -12,16 +12,14 @@ import net.matsudamper.serviceaccount.db.Database
 import net.matsudamper.serviceaccount.db.LoginFailureRepository
 import net.matsudamper.serviceaccount.db.PasskeyChallengeRepository
 import net.matsudamper.serviceaccount.db.PasskeyRepository
-import net.matsudamper.serviceaccount.db.SessionRepository
 import net.matsudamper.serviceaccount.db.UserRepository
 import net.matsudamper.serviceaccount.grpc.AccountGrpcService
 import net.matsudamper.serviceaccount.grpc.AuthGrpcService
 import net.matsudamper.serviceaccount.grpc.GrpcServer
 import net.matsudamper.serviceaccount.logic.PasskeyService
 import net.matsudamper.serviceaccount.logic.PasswordService
-import net.matsudamper.serviceaccount.logic.SessionService
 import net.matsudamper.serviceaccount.logic.UserAdminService
-import net.matsudamper.serviceaccount.token.AccessTokenService
+import net.matsudamper.serviceaccount.token.LoginTokenService
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("net.matsudamper.serviceaccount.Main")
@@ -42,7 +40,7 @@ fun main(args: Array<String>) {
 
         "set-password" -> exitProcess(UserCli(userAdminService(env)).setPassword(args.getOrNull(1)))
 
-        "generate-signing-key" -> println(AccessTokenService.generatePrivateJwkJson())
+        "generate-signing-key" -> println(LoginTokenService.generatePrivateJwkJson())
 
         "generate-client-secret" -> UserCli.printClientSecret()
 
@@ -65,19 +63,11 @@ private fun serve(env: ServerEnv) {
     val database = openDatabase(env)
     val clientRegistry = ClientRegistry.parse(env.clientsJson)
     val userRepository = UserRepository(database)
-    val accessTokenService =
-        AccessTokenService(
+    val loginTokenService =
+        LoginTokenService(
             privateJwkJson = env.signingJwk,
             issuer = env.issuer,
-            ttl = env.accessTokenTtl,
-            clock = clock,
-        )
-    val sessionService =
-        SessionService(
-            sessionRepository = SessionRepository(database),
-            userRepository = userRepository,
-            accessTokenService = accessTokenService,
-            refreshTokenTtl = env.refreshTokenTtl,
+            ttl = env.loginTokenTtl,
             clock = clock,
         )
     val passwordService =
@@ -103,16 +93,15 @@ private fun serve(env: ServerEnv) {
             services =
             listOf(
                 AuthGrpcService(
+                    userRepository = userRepository,
                     passwordService = passwordService,
                     passkeyService = passkeyService,
-                    sessionService = sessionService,
-                    accessTokenService = accessTokenService,
+                    loginTokenService = loginTokenService,
                 ),
                 AccountGrpcService(
                     userRepository = userRepository,
                     passwordService = passwordService,
                     passkeyService = passkeyService,
-                    sessionService = sessionService,
                 ),
             ),
         ).start()
@@ -122,7 +111,6 @@ private fun serve(env: ServerEnv) {
     runBlocking {
         while (true) {
             runCatching {
-                sessionService.deleteExpired()
                 passkeyService.deleteExpiredChallenges()
                 passwordService.deleteExpiredLoginFailures()
             }.onFailure { logger.warn("期限切れの記録を消せなかった", it) }

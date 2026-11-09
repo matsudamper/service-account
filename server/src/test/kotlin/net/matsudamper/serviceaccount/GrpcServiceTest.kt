@@ -25,7 +25,7 @@ import net.matsudamper.serviceaccount.proto.v1.LoginFailure
 import net.matsudamper.serviceaccount.proto.v1.LoginResponse
 import net.matsudamper.serviceaccount.proto.v1.getAccountRequest
 import net.matsudamper.serviceaccount.proto.v1.loginWithPasswordRequest
-import net.matsudamper.serviceaccount.proto.v1.verifyAccessTokenRequest
+import net.matsudamper.serviceaccount.proto.v1.verifyLoginTokenRequest
 
 class GrpcServiceTest {
     private val fixture = TestFixture()
@@ -43,8 +43,8 @@ class GrpcServiceTest {
         InProcessServerBuilder
             .forName(serverName)
             .directExecutor()
-            .addService(ServerInterceptors.intercept(AuthGrpcService(fixture.passwordService, fixture.passkeyService, fixture.sessionService, fixture.accessTokenService), interceptor))
-            .addService(ServerInterceptors.intercept(AccountGrpcService(fixture.userRepository, fixture.passwordService, fixture.passkeyService, fixture.sessionService), interceptor))
+            .addService(ServerInterceptors.intercept(AuthGrpcService(fixture.userRepository, fixture.passwordService, fixture.passkeyService, fixture.loginTokenService), interceptor))
+            .addService(ServerInterceptors.intercept(AccountGrpcService(fixture.userRepository, fixture.passwordService, fixture.passkeyService), interceptor))
             .build()
             .start()
     private val channel: ManagedChannel = InProcessChannelBuilder.forName(serverName).directExecutor().build()
@@ -56,35 +56,36 @@ class GrpcServiceTest {
     }
 
     @Test
-    fun ログインしたトークンでアカウントを読める() =
+    fun ログイントークンは発行先のクライアントでだけ通る() =
         runTest {
-            fixture.addUser()
+            val userId = fixture.addUser()
             val auth = AuthServiceGrpcKt.AuthServiceCoroutineStub(channel)
             val login = auth.loginWithPassword(loginRequest(), headers(CLIENT_ID, SECRET))
-            assertEquals(LoginResponse.ResultCase.TOKENS, login.resultCase)
+            assertEquals(LoginResponse.ResultCase.TOKEN, login.resultCase)
 
-            val account = AccountServiceGrpcKt.AccountServiceCoroutineStub(channel)
-            val response = account.getAccount(getAccountRequest { accessToken = login.tokens.accessToken }, headers(CLIENT_ID, SECRET))
-            assertEquals("alice", response.username)
-            assertTrue(response.hasPassword)
+            val verified = auth.verifyLoginToken(verifyLoginTokenRequest { token = login.token.token }, headers(CLIENT_ID, SECRET))
+            assertEquals(userId.value, verified.user.userId)
+            assertEquals("alice", verified.user.username)
+
+            val otherClient = auth.verifyLoginToken(verifyLoginTokenRequest { token = login.token.token }, headers(OTHER_CLIENT_ID, SECRET))
+            assertEquals(false, otherClient.hasUser())
         }
 
     @Test
-    fun 別のクライアントにはトークンが通らない() =
+    fun ユーザーIDでアカウントを読める() =
         runTest {
-            fixture.addUser()
-            val auth = AuthServiceGrpcKt.AuthServiceCoroutineStub(channel)
-            val login = auth.loginWithPassword(loginRequest(), headers(CLIENT_ID, SECRET))
+            val userId = fixture.addUser()
+            val account = AccountServiceGrpcKt.AccountServiceCoroutineStub(channel)
 
-            val verified = auth.verifyAccessToken(verifyAccessTokenRequest { accessToken = login.tokens.accessToken }, headers(OTHER_CLIENT_ID, SECRET))
-            assertEquals(false, verified.hasUser())
+            val response = account.getAccount(getAccountRequest { this.userId = userId.value }, headers(CLIENT_ID, SECRET))
+            assertEquals("alice", response.username)
+            assertTrue(response.hasPassword)
+
             val error =
                 assertFailsWith<StatusException> {
-                    AccountServiceGrpcKt
-                        .AccountServiceCoroutineStub(channel)
-                        .getAccount(getAccountRequest { accessToken = login.tokens.accessToken }, headers(OTHER_CLIENT_ID, SECRET))
+                    account.getAccount(getAccountRequest { this.userId = userId.value + 1 }, headers(CLIENT_ID, SECRET))
                 }
-            assertEquals(Status.Code.UNAUTHENTICATED, error.status.code)
+            assertEquals(Status.Code.NOT_FOUND, error.status.code)
         }
 
     @Test
@@ -118,7 +119,6 @@ class GrpcServiceTest {
             username = "alice"
             password = TestFixture.PASSWORD
             clientIp = "192.0.2.1"
-            sessionName = "test"
         }
 
     private fun headers(

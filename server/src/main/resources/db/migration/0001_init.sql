@@ -27,20 +27,6 @@ CREATE TABLE passkeys
 );
 CREATE INDEX passkeys_user_id ON passkeys (user_id);
 
-CREATE TABLE sessions
-(
-    session_id         TEXT PRIMARY KEY,
-    user_id            INTEGER NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
-    client_id          TEXT    NOT NULL,
-    refresh_token_hash TEXT    NOT NULL UNIQUE,
-    name               TEXT    NOT NULL,
-    created_at         INTEGER NOT NULL,
-    last_used_at       INTEGER NOT NULL,
-    expires_at         INTEGER NOT NULL
-);
-CREATE INDEX sessions_user_id ON sessions (user_id);
-CREATE INDEX sessions_expires_at ON sessions (expires_at);
-
 CREATE TABLE passkey_challenges
 (
     challenge  TEXT PRIMARY KEY,

@@ -2,7 +2,6 @@ package net.matsudamper.serviceaccount
 
 import java.io.File
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -25,9 +24,10 @@ class ServerEnv(
 
     val clientsJson: String get() = File(required("SERVICE_ACCOUNT_CLIENTS_FILE")).readText()
 
-    val accessTokenTtl: Duration = env["SERVICE_ACCOUNT_ACCESS_TOKEN_TTL_SECONDS"]?.toLong()?.seconds ?: 10.minutes
-
-    val refreshTokenTtl: Duration = env["SERVICE_ACCOUNT_REFRESH_TOKEN_TTL_DAYS"]?.toLong()?.days ?: 30.days
+    /**
+     * 呼び出し元はログイントークンを受け取ってすぐ検証するので短くてよい。サーバー間の時計のずれの分だけ余裕を持たせる
+     */
+    val loginTokenTtl: Duration = env["SERVICE_ACCOUNT_LOGIN_TOKEN_TTL_SECONDS"]?.toLong()?.seconds ?: 5.minutes
 
     val maxLoginFailures: Int = env["SERVICE_ACCOUNT_MAX_LOGIN_FAILURES"]?.toInt() ?: 10
 

@@ -21,12 +21,12 @@ import com.nimbusds.jwt.SignedJWT
 import net.matsudamper.serviceaccount.db.UserId
 
 /**
- * ES256 で署名した JWT のアクセストークン。
- * 短命にして、セッションの削除は [AccessTokenClaims.sessionId] をサービス側で見て反映する
+ * ログインに通ったことを呼び出し元に伝える、ES256 で署名した短命な JWT。
+ * 呼び出し元は検証したらすぐ自分のセッションを作る前提で、ログイン状態の管理には使わない
  *
  * @param privateJwkJson 秘密鍵を含む P-256 の EC JWK。kid 必須
  */
-class AccessTokenService(
+class LoginTokenService(
     privateJwkJson: String,
     private val issuer: String,
     private val ttl: Duration,
@@ -48,9 +48,8 @@ class AccessTokenService(
     fun issue(
         userId: UserId,
         username: String,
-        sessionId: String,
         clientId: String,
-    ): IssuedAccessToken {
+    ): IssuedLoginToken {
         val now = clock.instant()
         val expiresAt = now.plus(ttl.toJavaDuration())
         val claims =
@@ -64,7 +63,6 @@ class AccessTokenService(
                 .expirationTime(Date.from(expiresAt))
                 .jwtID(UUID.randomUUID().toString())
                 .claim(CLAIM_USERNAME, username)
-                .claim(CLAIM_SESSION_ID, sessionId)
                 .build()
         val jwt =
             SignedJWT(
@@ -76,7 +74,7 @@ class AccessTokenService(
                 claims,
             )
         jwt.sign(signer)
-        return IssuedAccessToken(token = jwt.serialize(), expiresAt = expiresAt)
+        return IssuedLoginToken(token = jwt.serialize(), expiresAt = expiresAt)
     }
 
     /**
@@ -85,7 +83,7 @@ class AccessTokenService(
     fun verify(
         token: String,
         clientId: String,
-    ): AccessTokenClaims? {
+    ): LoginTokenClaims? {
         val jwt =
             try {
                 SignedJWT.parse(token)
@@ -114,16 +112,14 @@ class AccessTokenService(
         if (!now.before(expiresAt)) return null
         if (claims.notBeforeTime?.after(now) == true) return null
 
-        return AccessTokenClaims(
+        return LoginTokenClaims(
             userId = UserId(claims.subject?.toLongOrNull() ?: return null),
             username = claims.getStringClaim(CLAIM_USERNAME) ?: return null,
-            sessionId = claims.getStringClaim(CLAIM_SESSION_ID) ?: return null,
         )
     }
 
     companion object {
         private const val CLAIM_USERNAME = "preferred_username"
-        private const val CLAIM_SESSION_ID = "sid"
 
         fun generatePrivateJwkJson(): String =
             com.nimbusds.jose.jwk.gen
@@ -134,13 +130,12 @@ class AccessTokenService(
     }
 }
 
-class IssuedAccessToken(
+class IssuedLoginToken(
     val token: String,
     val expiresAt: Instant,
 )
 
-data class AccessTokenClaims(
+data class LoginTokenClaims(
     val userId: UserId,
     val username: String,
-    val sessionId: String,
 )

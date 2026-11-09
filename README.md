@@ -2,9 +2,9 @@
 
 複数のサービスのログインをまとめる認証サービス。各サービスのバックエンドから gRPC で呼び出す。
 
-- ログイン: パスワード / パスキー（WebAuthn）
-- ログイン状態: ES256 で署名した JWT のアクセストークン（短命）と、使うたびに作り直すリフレッシュトークン
-- アカウント操作: パスワードの変更・追加・削除、パスキーの登録・一覧・削除、セッションの一覧・削除・名前変更
+- ログイン: パスワード / パスキー（WebAuthn）。通ると ES256 で署名した短命な JWT（ログイントークン）を返す
+- アカウント操作: パスワードの変更・追加・削除、パスキーの登録・一覧・削除
+- ログイン状態（セッション）は持たない。呼び出し元のサービスがログイントークンを検証して自分のセッションを作る
 - ユーザー登録: サーバー上の CLI からだけ行う
 - 保存先: SQLite
 - 配布: GraalVM の native image を distroless に載せた Docker イメージ
@@ -19,15 +19,18 @@ API は [service_account.proto](proto/src/main/proto/serviceaccount/v1/service_a
 - `x-client-id`: 設定ファイルの `id`
 - `authorization`: `Bearer <クライアントシークレット>`
 
-アクセストークンの `aud` とリフレッシュトークンは発行を依頼したクライアントに紐づき、別のクライアントからは使えない。
+ログイントークンの `aud` は発行を依頼したクライアントの id で、別のクライアントでは通らない。
+`AccountService` には、呼び出し元が自分のセッションで確かめたユーザーの `user_id` を渡す。
 パスキーは RP ID に紐づくので、クライアントの `passkey.rpId` で登録したものだけがそのクライアントからのログインに使える。
 
-## アクセストークンの検証
+## ログインの流れ
 
-- `AuthService.VerifyAccessToken`: 署名・期限・`aud` に加え、セッションが消されていないかも見る
-- `AuthService.GetJwks` の公開鍵で呼び出し側が検証する: 速いが、期限内はセッションの削除が反映されない
+1. 呼び出し元が `LoginWithPassword` か `LoginWithPasskey` を呼び、ログイントークンを受け取る
+2. `VerifyLoginToken` か、`GetJwks` の公開鍵でログイントークンを検証する
+3. 検証したユーザーで自分のセッションを作る。以降のログイン状態とログアウトは呼び出し元が管理する
 
-クレームは `sub`（ユーザー ID）、`preferred_username`、`sid`（セッション ID）、`aud`（クライアント ID）。
+クレームは `sub`（ユーザー ID）、`preferred_username`、`aud`（クライアント ID）、`jti`。
+期限内は同じトークンを何度でも検証できるので、受け取ったらすぐ使い、保存しない。
 
 ## 設定
 
@@ -38,10 +41,9 @@ API は [service_account.proto](proto/src/main/proto/serviceaccount/v1/service_a
 | 3 | `SERVICE_ACCOUNT_CLIENTS_FILE` | 必須 | クライアントの設定ファイル。[clients.example.json](clients.example.json) |
 | 4 | `SERVICE_ACCOUNT_DATABASE_PATH` | `data/service-account.db`（Docker では `/app/data/service-account.db`） | SQLite のファイル |
 | 5 | `SERVICE_ACCOUNT_GRPC_PORT` | `50051` | 待ち受けるポート |
-| 6 | `SERVICE_ACCOUNT_ACCESS_TOKEN_TTL_SECONDS` | `600` | アクセストークンの有効期間 |
-| 7 | `SERVICE_ACCOUNT_REFRESH_TOKEN_TTL_DAYS` | `30` | リフレッシュトークンの有効期間。使うたびに延びる |
-| 8 | `SERVICE_ACCOUNT_MAX_LOGIN_FAILURES` | `10` | 送信元ごとのパスワード失敗の上限 |
-| 9 | `SERVICE_ACCOUNT_LOGIN_LOCK_MINUTES` | `15` | 上限に達したときの締め出し時間 |
+| 6 | `SERVICE_ACCOUNT_LOGIN_TOKEN_TTL_SECONDS` | `300` | ログイントークンの有効期間 |
+| 7 | `SERVICE_ACCOUNT_MAX_LOGIN_FAILURES` | `10` | 送信元ごとのパスワード失敗の上限 |
+| 8 | `SERVICE_ACCOUNT_LOGIN_LOCK_MINUTES` | `15` | 上限に達したときの締め出し時間 |
 
 TLS は終端しない。内部ネットワークか、TLS を終端するリバースプロキシの後ろに置く。
 

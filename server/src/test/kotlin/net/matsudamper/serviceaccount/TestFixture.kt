@@ -5,21 +5,18 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
 import net.matsudamper.serviceaccount.db.Database
 import net.matsudamper.serviceaccount.db.LoginFailureRepository
 import net.matsudamper.serviceaccount.db.PasskeyChallengeRepository
 import net.matsudamper.serviceaccount.db.PasskeyRepository
-import net.matsudamper.serviceaccount.db.SessionRepository
 import net.matsudamper.serviceaccount.db.UserId
 import net.matsudamper.serviceaccount.db.UserRepository
 import net.matsudamper.serviceaccount.logic.PasskeyService
 import net.matsudamper.serviceaccount.logic.PasswordService
-import net.matsudamper.serviceaccount.logic.SessionService
 import net.matsudamper.serviceaccount.logic.UserAdminService
-import net.matsudamper.serviceaccount.token.AccessTokenService
+import net.matsudamper.serviceaccount.token.LoginTokenService
 
 class MutableClock(
     var now: Instant = Instant.parse("2026-01-01T00:00:00Z"),
@@ -43,8 +40,7 @@ class TestFixture(
         Database(Files.createTempFile("service-account-test", ".db").toString()).also { it.migrate() }
     val userRepository = UserRepository(database)
     val passkeyRepository = PasskeyRepository(database)
-    val accessTokenService = AccessTokenService(SIGNING_JWK, issuer = ISSUER, ttl = 10.minutes, clock = clock)
-    val sessionService = SessionService(SessionRepository(database), userRepository, accessTokenService, refreshTokenTtl = 30.days, clock = clock)
+    val loginTokenService = LoginTokenService(SIGNING_JWK, issuer = ISSUER, ttl = 5.minutes, clock = clock)
     val passwordService = PasswordService(userRepository, LoginFailureRepository(database), maxLoginFailures = maxLoginFailures, lockDuration = 15.minutes, clock = clock)
     val passkeyService = PasskeyService(passkeyRepository, PasskeyChallengeRepository(database), userRepository, clock)
     val userAdminService = UserAdminService(userRepository, clock)
@@ -57,6 +53,6 @@ class TestFixture(
     companion object {
         const val ISSUER = "https://auth.example.com"
         const val PASSWORD = "correct-horse-battery-staple"
-        val SIGNING_JWK: String = AccessTokenService.generatePrivateJwkJson()
+        val SIGNING_JWK: String = LoginTokenService.generatePrivateJwkJson()
     }
 }
