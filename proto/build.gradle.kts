@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.protobuf)
+    `java-library`
+    `maven-publish`
 }
 
 dependencies {

@@ -10,7 +10,34 @@
 - 配布: GraalVM の native image を distroless に載せた Docker イメージ
 
 API は [service_account.proto](proto/src/main/proto/serviceaccount/v1/service_account.proto) を参照。
-呼び出し側は `:proto` モジュール（Kotlin のコルーチン用スタブを含む）を使える。
+
+## 接続ライブラリ
+
+maven.matsudamper.net に公開している。
+
+```kotlin
+repositories {
+    maven { url = uri("https://maven.matsudamper.net/releases") }
+}
+
+dependencies {
+    implementation("net.matsudamper.serviceaccount:client:<version>")
+}
+```
+
+```kotlin
+val client = ServiceAccountClient.create(host = "service-account", port = 50051, clientId = "kake-bo", clientSecret = secret)
+val response = client.auth.loginWithPassword(
+    loginWithPasswordRequest {
+        username = "alice"
+        password = password
+        clientIp = remoteAddress
+    },
+)
+```
+
+- `client`: クライアント ID とシークレットを付けて繋ぐ `ServiceAccountClient`。transport に grpc-netty-shaded を含む
+- `proto`: 生成したメッセージとコルーチン用のスタブだけ
 
 ## 呼び出し元の認証
 
@@ -82,4 +109,6 @@ docker build -t service-account .
 ## リリース
 
 Actions の Release を手動で実行する。`version` を入力し、`latest` のチェックで GitHub Release の Latest と Docker の `latest` タグを付けるかを選ぶ。
-イメージは `ghcr.io/matsudamper/service-account` に公開する。
+イメージは `ghcr.io/matsudamper/service-account` に、接続ライブラリは maven.matsudamper.net に同じバージョンで公開する。
+
+接続ライブラリの公開には、environment `production` に `MAVEN_MATSUDAMPER_USERNAME` と `MAVEN_MATSUDAMPER_TOKEN` のシークレットが要る。
