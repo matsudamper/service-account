@@ -1,0 +1,20 @@
+{
+  "clients": [
+    {
+      "id": "kake-bo",
+      "secretSha256": "generate-client-secret の secretSha256 を書く",
+      "redirectUris": ["https://money.example.com/login/callback"]
+    },
+    {
+      "id": "kmp-activitypub",
+      "secretSha256": "generate-client-secret の secretSha256 を書く",
+      "redirectUris": ["https://social.example.org/login/callback"]
+    }
+  ],
+  "androidApps": [
+    {
+      "packageName": "net.matsudamper.money",
+      "sha256CertFingerprints": ["AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"]
+    }
+  ]
+}

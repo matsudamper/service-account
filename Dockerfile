@@ -8,7 +8,7 @@ FROM gcr.io/distroless/cc-debian13:nonroot
 WORKDIR /app
 
 ENV SERVICE_ACCOUNT_DATABASE_PATH=/app/data/service-account.db
-EXPOSE 50051
+EXPOSE 8080 50051
 
 COPY --from=data --chown=nonroot:nonroot /app/data /app/data
 # libmanagement_ext.so は native image が実行ファイルの隣から読む
