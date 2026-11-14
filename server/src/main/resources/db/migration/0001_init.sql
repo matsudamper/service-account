@@ -18,7 +18,6 @@ CREATE TABLE passkeys
 (
     credential_id            TEXT PRIMARY KEY,
     user_id                  INTEGER NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
-    rp_id                    TEXT    NOT NULL,
     attested_credential_data BLOB    NOT NULL,
     sign_count               INTEGER NOT NULL,
     name                     TEXT    NOT NULL,
@@ -31,7 +30,6 @@ CREATE TABLE passkey_challenges
 (
     challenge  TEXT PRIMARY KEY,
     purpose    TEXT    NOT NULL,
-    client_id  TEXT    NOT NULL,
     user_id    INTEGER,
     expires_at INTEGER NOT NULL
 );
@@ -46,3 +44,14 @@ CREATE TABLE login_failures
     PRIMARY KEY (client_ip, username)
 );
 CREATE INDEX login_failures_expires_at ON login_failures (expires_at);
+
+CREATE TABLE authorization_codes
+(
+    code_hash      TEXT PRIMARY KEY,
+    client_id      TEXT    NOT NULL,
+    redirect_uri   TEXT    NOT NULL,
+    code_challenge TEXT    NOT NULL,
+    user_id        INTEGER NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    expires_at     INTEGER NOT NULL
+);
+CREATE INDEX authorization_codes_expires_at ON authorization_codes (expires_at);

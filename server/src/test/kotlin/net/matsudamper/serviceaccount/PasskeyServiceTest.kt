@@ -6,20 +6,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import net.matsudamper.serviceaccount.client.RegisteredClient
 import net.matsudamper.serviceaccount.logic.PasskeyService
-import net.matsudamper.serviceaccount.passkey.PasskeyRelyingParty
 
 class PasskeyServiceTest {
-    private val client = RegisteredClient("kake-bo", "unused", PasskeyRelyingParty("example.com", setOf("https://example.com")))
-
     @Test
     fun 読めない登録の応答は受け付けない() {
         val fixture = TestFixture()
         val userId = fixture.addUser()
 
         listOf("{}", "not json", """{"id":"AA","rawId":"AA","type":"public-key","response":{}}""").forEach { credentialJson ->
-            assertEquals(PasskeyService.RegistrationResult.NotAccepted, fixture.passkeyService.register(client, userId, "key", credentialJson))
+            assertEquals(PasskeyService.RegistrationResult.NotAccepted, fixture.passkeyService.register(userId, "key", credentialJson))
         }
     }
 
@@ -28,7 +24,7 @@ class PasskeyServiceTest {
         val fixture = TestFixture()
 
         listOf("{}", "not json", """{"id":"AA","rawId":"AA","type":"public-key","response":{}}""").forEach { credentialJson ->
-            assertNull(fixture.passkeyService.login(client, credentialJson))
+            assertNull(fixture.passkeyService.login(credentialJson))
         }
     }
 
@@ -36,10 +32,10 @@ class PasskeyServiceTest {
     fun 署名回数は検証に使った値のままのときだけ更新する() {
         val fixture = TestFixture()
         val userId = fixture.addUser()
-        fixture.passkeyRepository.add(userId, "example.com", "credential", byteArrayOf(1), 10, "key", Instant.EPOCH)
+        fixture.passkeyRepository.add(userId, "credential", byteArrayOf(1), 10, "key", Instant.EPOCH)
 
         assertTrue(fixture.passkeyRepository.updateSignCount("credential", expectedSignCount = 10, signCount = 12, usedAt = Instant.EPOCH))
         assertFalse(fixture.passkeyRepository.updateSignCount("credential", expectedSignCount = 10, signCount = 11, usedAt = Instant.EPOCH))
-        assertEquals(12, fixture.passkeyRepository.find("credential", "example.com")?.signCount)
+        assertEquals(12, fixture.passkeyRepository.find("credential")?.signCount)
     }
 }

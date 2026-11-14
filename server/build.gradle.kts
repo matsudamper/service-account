@@ -9,6 +9,8 @@ dependencies {
     implementation(project(":proto"))
     implementation(libs.grpc.netty.shaded)
     implementation(libs.grpc.services)
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.sqlite.jdbc)
@@ -25,6 +27,7 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.grpc.inprocess)
+    testImplementation(libs.ktor.server.test.host)
 }
 
 kotlin {
@@ -54,6 +57,7 @@ graalvmNative {
             buildArgs.add("--enable-native-access=ALL-UNNAMED")
             buildArgs.add("--features=net.matsudamper.serviceaccount.graalvm.WebAuthn4jReflectionFeature")
             buildArgs.add("-H:IncludeResources=db/migration/.*\\.sql")
+            buildArgs.add("-H:IncludeResources=web/.*")
         }
     }
 }

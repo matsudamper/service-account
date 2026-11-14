@@ -3,7 +3,6 @@ package net.matsudamper.serviceaccount.logic
 import java.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
-import net.matsudamper.serviceaccount.client.RegisteredClient
 import net.matsudamper.serviceaccount.db.PasskeyChallengePurpose
 import net.matsudamper.serviceaccount.db.PasskeyChallengeRepository
 import net.matsudamper.serviceaccount.db.PasskeyDeleteResult
@@ -13,29 +12,31 @@ import net.matsudamper.serviceaccount.db.User
 import net.matsudamper.serviceaccount.db.UserId
 import net.matsudamper.serviceaccount.db.UserRepository
 import net.matsudamper.serviceaccount.passkey.PasskeyJson
+import net.matsudamper.serviceaccount.passkey.PasskeyRelyingParty
 import net.matsudamper.serviceaccount.passkey.PasskeyVerificationException
 import net.matsudamper.serviceaccount.passkey.PasskeyVerifier
 import org.slf4j.LoggerFactory
 
 /**
  * 認証器との受け渡しは [PasskeyJson] の JSON で行う。
- * パスキーは RP ID に紐づくので、呼び出し元クライアントの RP ID で登録したものだけをログインに使う
+ * RP ID はこのサービスのドメイン 1 つで、Web と Android アプリのどちらからも同じパスキーを使う
  */
 class PasskeyService(
+    private val relyingParty: PasskeyRelyingParty,
     private val passkeyRepository: PasskeyRepository,
     private val challengeRepository: PasskeyChallengeRepository,
     private val userRepository: UserRepository,
     private val clock: Clock,
 ) {
-    private val verifiers = mutableMapOf<String, PasskeyVerifier>()
+    private val verifier = PasskeyVerifier(relyingParty)
 
     /**
      * @return PublicKeyCredentialRequestOptionsJSON
      */
-    fun loginOptions(client: RegisteredClient): String =
+    fun loginOptions(): String =
         PasskeyJson.requestOptions(
-            relyingParty = client.relyingParty,
-            challenge = issueChallenge(client, PasskeyChallengePurpose.Authentication, userId = null),
+            relyingParty = relyingParty,
+            challenge = issueChallenge(PasskeyChallengePurpose.Authentication, userId = null),
             timeout = CHALLENGE_TTL,
         )
 
@@ -43,20 +44,16 @@ class PasskeyService(
      * @param credentialJson AuthenticationResponseJSON
      * @return 通ればログインするユーザー
      */
-    fun login(
-        client: RegisteredClient,
-        credentialJson: String,
-    ): UserId? =
+    fun login(credentialJson: String): UserId? =
         verifyOrNull {
-            val verifier = verifierOf(client)
             val authentication = verifier.parseAuthentication(credentialJson)
-            if (!challengeRepository.consume(authentication.challenge, PasskeyChallengePurpose.Authentication, client.id, userId = null, now = clock.instant())) {
+            if (!challengeRepository.consume(authentication.challenge, PasskeyChallengePurpose.Authentication, userId = null, now = clock.instant())) {
                 throw PasskeyVerificationException("発行していないか期限切れの challenge")
             }
 
             val credentialId = SecureTokens.encode(authentication.credentialId)
             val passkey =
-                passkeyRepository.find(credentialId = credentialId, rpId = client.relyingParty.id)
+                passkeyRepository.find(credentialId)
                     ?: throw PasskeyVerificationException("登録されていない credential ID")
             val owner = userRepository.findById(passkey.userId) ?: throw PasskeyVerificationException("持ち主がいない")
             // 別のユーザーのパスキーで、このユーザーの user handle を名乗っていないかを見る
@@ -83,17 +80,14 @@ class PasskeyService(
     /**
      * @return PublicKeyCredentialCreationOptionsJSON
      */
-    fun registrationOptions(
-        client: RegisteredClient,
-        user: User,
-    ): String =
+    fun registrationOptions(user: User): String =
         PasskeyJson.creationOptions(
-            relyingParty = client.relyingParty,
-            challenge = issueChallenge(client, PasskeyChallengePurpose.Registration, userId = user.id),
+            relyingParty = relyingParty,
+            challenge = issueChallenge(PasskeyChallengePurpose.Registration, userId = user.id),
             userHandle = user.passkeyUserHandle,
             username = user.username,
-            algorithms = verifierOf(client).supportedAlgorithms,
-            excludeCredentialIds = passkeyRepository.credentialIds(userId = user.id, rpId = client.relyingParty.id),
+            algorithms = verifier.supportedAlgorithms,
+            excludeCredentialIds = passkeyRepository.credentialIds(user.id),
             timeout = CHALLENGE_TTL,
         )
 
@@ -101,7 +95,6 @@ class PasskeyService(
      * @param credentialJson RegistrationResponseJSON
      */
     fun register(
-        client: RegisteredClient,
         userId: UserId,
         name: String,
         credentialJson: String,
@@ -111,10 +104,9 @@ class PasskeyService(
 
         val registered =
             verifyOrNull {
-                val verifier = verifierOf(client)
                 val registration = verifier.parseRegistration(credentialJson)
-                // 別のユーザー・クライアント向けに発行した challenge では足させない
-                if (!challengeRepository.consume(registration.challenge, PasskeyChallengePurpose.Registration, client.id, userId = userId, now = clock.instant())) {
+                // 別のユーザー向けに発行した challenge では足させない
+                if (!challengeRepository.consume(registration.challenge, PasskeyChallengePurpose.Registration, userId = userId, now = clock.instant())) {
                     throw PasskeyVerificationException("発行していないか期限切れの challenge")
                 }
                 verifier.verifyRegistration(registration)
@@ -123,7 +115,6 @@ class PasskeyService(
         val added =
             passkeyRepository.add(
                 userId = userId,
-                rpId = client.relyingParty.id,
                 credentialId = SecureTokens.encode(registered.credentialId),
                 attestedCredentialData = registered.attestedCredentialData,
                 signCount = registered.signCount,
@@ -144,13 +135,7 @@ class PasskeyService(
         challengeRepository.deleteExpired(clock.instant())
     }
 
-    private fun verifierOf(client: RegisteredClient): PasskeyVerifier =
-        synchronized(verifiers) {
-            verifiers.getOrPut(client.id) { PasskeyVerifier(client.relyingParty) }
-        }
-
     private fun issueChallenge(
-        client: RegisteredClient,
         purpose: PasskeyChallengePurpose,
         userId: UserId?,
     ): String {
@@ -158,7 +143,6 @@ class PasskeyService(
         challengeRepository.add(
             challenge = challenge,
             purpose = purpose,
-            clientId = client.id,
             userId = userId,
             expiresAt = clock.instant().plus(CHALLENGE_TTL.toJavaDuration()),
         )

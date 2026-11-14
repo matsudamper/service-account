@@ -6,20 +6,26 @@ import kotlin.system.exitProcess
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.embeddedServer
 import net.matsudamper.serviceaccount.cli.UserCli
-import net.matsudamper.serviceaccount.client.ClientRegistry
+import net.matsudamper.serviceaccount.client.ServiceConfig
+import net.matsudamper.serviceaccount.db.AuthorizationCodeRepository
 import net.matsudamper.serviceaccount.db.Database
 import net.matsudamper.serviceaccount.db.LoginFailureRepository
 import net.matsudamper.serviceaccount.db.PasskeyChallengeRepository
 import net.matsudamper.serviceaccount.db.PasskeyRepository
 import net.matsudamper.serviceaccount.db.UserRepository
-import net.matsudamper.serviceaccount.grpc.AccountGrpcService
 import net.matsudamper.serviceaccount.grpc.AuthGrpcService
 import net.matsudamper.serviceaccount.grpc.GrpcServer
+import net.matsudamper.serviceaccount.logic.AuthorizationService
 import net.matsudamper.serviceaccount.logic.PasskeyService
 import net.matsudamper.serviceaccount.logic.PasswordService
 import net.matsudamper.serviceaccount.logic.UserAdminService
-import net.matsudamper.serviceaccount.token.LoginTokenService
+import net.matsudamper.serviceaccount.passkey.PasskeyRelyingParty
+import net.matsudamper.serviceaccount.token.TokenService
+import net.matsudamper.serviceaccount.web.WebDependencies
+import net.matsudamper.serviceaccount.web.webModule
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("net.matsudamper.serviceaccount.Main")
@@ -40,7 +46,7 @@ fun main(args: Array<String>) {
 
         "set-password" -> exitProcess(UserCli(userAdminService(env)).setPassword(args.getOrNull(1)))
 
-        "generate-signing-key" -> println(LoginTokenService.generatePrivateJwkJson())
+        "generate-signing-key" -> println(TokenService.generatePrivateJwkJson())
 
         "generate-client-secret" -> UserCli.printClientSecret()
 
@@ -61,13 +67,20 @@ private fun userAdminService(env: ServerEnv): UserAdminService = UserAdminServic
 private fun serve(env: ServerEnv) {
     val clock = Clock.systemUTC()
     val database = openDatabase(env)
-    val clientRegistry = ClientRegistry.parse(env.clientsJson)
+    val config = ServiceConfig.parse(env.configJson)
+    val publicUrl = env.publicUrl
+    val relyingParty =
+        PasskeyRelyingParty(
+            id = checkNotNull(publicUrl.host) { "SERVICE_ACCOUNT_PUBLIC_URL にホスト名が無い" },
+            origins = setOf(publicUrl.toString()) + config.androidApps.flatMap { it.passkeyOrigins },
+        )
     val userRepository = UserRepository(database)
-    val loginTokenService =
-        LoginTokenService(
+    val tokenService =
+        TokenService(
             privateJwkJson = env.signingJwk,
             issuer = env.issuer,
-            ttl = env.loginTokenTtl,
+            loginTokenTtl = env.loginTokenTtl,
+            accountTokenTtl = env.accountTokenTtl,
             clock = clock,
         )
     val passwordService =
@@ -80,39 +93,60 @@ private fun serve(env: ServerEnv) {
         )
     val passkeyService =
         PasskeyService(
+            relyingParty = relyingParty,
             passkeyRepository = PasskeyRepository(database),
             challengeRepository = PasskeyChallengeRepository(database),
             userRepository = userRepository,
             clock = clock,
         )
+    val authorizationService =
+        AuthorizationService(
+            clientRegistry = config.clientRegistry,
+            codeRepository = AuthorizationCodeRepository(database),
+            userRepository = userRepository,
+            tokenService = tokenService,
+            clock = clock,
+        )
 
-    val server =
-        GrpcServer.create(
-            port = env.grpcPort,
-            clientRegistry = clientRegistry,
-            services =
-            listOf(
-                AuthGrpcService(
-                    userRepository = userRepository,
-                    passwordService = passwordService,
-                    passkeyService = passkeyService,
-                    loginTokenService = loginTokenService,
-                ),
-                AccountGrpcService(
-                    userRepository = userRepository,
-                    passwordService = passwordService,
-                    passkeyService = passkeyService,
-                ),
-            ),
-        ).start()
+    val grpcServer =
+        GrpcServer
+            .create(
+                port = env.grpcPort,
+                clientRegistry = config.clientRegistry,
+                services = listOf(AuthGrpcService(authorizationService = authorizationService, tokenService = tokenService)),
+            ).start()
     logger.info("gRPC サーバーを {} 番で起動した", env.grpcPort)
-    Runtime.getRuntime().addShutdownHook(Thread { server.shutdown() })
+
+    val webServer =
+        embeddedServer(CIO, port = env.httpPort) {
+            webModule(
+                WebDependencies(
+                    clientRegistry = config.clientRegistry,
+                    androidApps = config.androidApps,
+                    userRepository = userRepository,
+                    passwordService = passwordService,
+                    passkeyService = passkeyService,
+                    authorizationService = authorizationService,
+                    tokenService = tokenService,
+                    trustCfConnectingIp = env.trustCfConnectingIp,
+                ),
+            )
+        }.start(wait = false)
+    logger.info("HTTP サーバーを {} 番で起動した。RP ID: {} origin: {}", env.httpPort, relyingParty.id, relyingParty.origins.joinToString())
+
+    Runtime.getRuntime().addShutdownHook(
+        Thread {
+            webServer.stop()
+            grpcServer.shutdown()
+        },
+    )
 
     runBlocking {
         while (true) {
             runCatching {
                 passkeyService.deleteExpiredChallenges()
                 passwordService.deleteExpiredLoginFailures()
+                authorizationService.deleteExpired()
             }.onFailure { logger.warn("期限切れの記録を消せなかった", it) }
             delay(1.hours)
         }

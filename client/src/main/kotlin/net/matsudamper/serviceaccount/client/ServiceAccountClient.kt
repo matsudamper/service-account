@@ -8,7 +8,6 @@ import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import io.grpc.Metadata
 import io.grpc.stub.MetadataUtils
-import net.matsudamper.serviceaccount.proto.v1.AccountServiceGrpcKt
 import net.matsudamper.serviceaccount.proto.v1.AuthServiceGrpcKt
 
 /**
@@ -16,7 +15,7 @@ import net.matsudamper.serviceaccount.proto.v1.AuthServiceGrpcKt
  *
  * ```kotlin
  * val client = ServiceAccountClient.create(host = "service-account", port = 50051, clientId = "kake-bo", clientSecret = secret)
- * val response = client.auth.loginWithPassword(loginWithPasswordRequest { ... })
+ * val response = client.auth.exchangeAuthorizationCode(exchangeAuthorizationCodeRequest { ... })
  * ```
  */
 class ServiceAccountClient(
@@ -28,8 +27,6 @@ class ServiceAccountClient(
     private val authenticatedChannel: Channel = ClientInterceptors.intercept(channel, MetadataUtils.newAttachHeadersInterceptor(credentialHeaders(clientId, clientSecret)))
 
     val auth: AuthServiceGrpcKt.AuthServiceCoroutineStub = AuthServiceGrpcKt.AuthServiceCoroutineStub(authenticatedChannel)
-
-    val account: AccountServiceGrpcKt.AccountServiceCoroutineStub = AccountServiceGrpcKt.AccountServiceCoroutineStub(authenticatedChannel)
 
     /**
      * [create] で作った接続だけを閉じる。外から渡した Channel は呼び出し側が閉じる

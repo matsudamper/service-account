@@ -3,96 +3,65 @@ package net.matsudamper.serviceaccount.grpc
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import net.matsudamper.serviceaccount.client.RegisteredClient
-import net.matsudamper.serviceaccount.db.UserId
-import net.matsudamper.serviceaccount.db.UserRepository
-import net.matsudamper.serviceaccount.logic.PasskeyService
-import net.matsudamper.serviceaccount.logic.PasswordLoginResult
-import net.matsudamper.serviceaccount.logic.PasswordService
+import net.matsudamper.serviceaccount.logic.AuthorizationService
 import net.matsudamper.serviceaccount.proto.v1.AuthServiceGrpcKt
-import net.matsudamper.serviceaccount.proto.v1.CreatePasskeyLoginOptionsRequest
-import net.matsudamper.serviceaccount.proto.v1.CreatePasskeyLoginOptionsResponse
+import net.matsudamper.serviceaccount.proto.v1.AuthenticatedUser
+import net.matsudamper.serviceaccount.proto.v1.ExchangeAuthorizationCodeRequest
+import net.matsudamper.serviceaccount.proto.v1.ExchangeAuthorizationCodeResponse
 import net.matsudamper.serviceaccount.proto.v1.GetJwksRequest
 import net.matsudamper.serviceaccount.proto.v1.GetJwksResponse
-import net.matsudamper.serviceaccount.proto.v1.LoginFailure
-import net.matsudamper.serviceaccount.proto.v1.LoginResponse
-import net.matsudamper.serviceaccount.proto.v1.LoginWithPasskeyRequest
-import net.matsudamper.serviceaccount.proto.v1.LoginWithPasswordRequest
 import net.matsudamper.serviceaccount.proto.v1.VerifyLoginTokenRequest
 import net.matsudamper.serviceaccount.proto.v1.VerifyLoginTokenResponse
 import net.matsudamper.serviceaccount.proto.v1.authenticatedUser
-import net.matsudamper.serviceaccount.proto.v1.createPasskeyLoginOptionsResponse
+import net.matsudamper.serviceaccount.proto.v1.exchangeAuthorizationCodeResponse
 import net.matsudamper.serviceaccount.proto.v1.getJwksResponse
-import net.matsudamper.serviceaccount.proto.v1.loginResponse
 import net.matsudamper.serviceaccount.proto.v1.loginToken
 import net.matsudamper.serviceaccount.proto.v1.verifyLoginTokenResponse
-import net.matsudamper.serviceaccount.token.LoginTokenService
+import net.matsudamper.serviceaccount.token.TokenClaims
+import net.matsudamper.serviceaccount.token.TokenService
 
 class AuthGrpcService(
-    private val userRepository: UserRepository,
-    private val passwordService: PasswordService,
-    private val passkeyService: PasskeyService,
-    private val loginTokenService: LoginTokenService,
+    private val authorizationService: AuthorizationService,
+    private val tokenService: TokenService,
     private val ioContext: CoroutineContext = Dispatchers.IO,
 ) : AuthServiceGrpcKt.AuthServiceCoroutineImplBase() {
-    override suspend fun loginWithPassword(request: LoginWithPasswordRequest): LoginResponse {
+    override suspend fun exchangeAuthorizationCode(request: ExchangeAuthorizationCodeRequest): ExchangeAuthorizationCodeResponse {
         val client = ClientAuthInterceptor.currentClient()
         return withContext(ioContext) {
-            when (val result = passwordService.login(username = request.username, password = request.password, clientIp = request.clientIp)) {
-                is PasswordLoginResult.Success -> successResponse(client, result.userId)
-                PasswordLoginResult.NotAccepted -> loginResponse { failure = LoginFailure.LOGIN_FAILURE_NOT_ACCEPTED }
-                PasswordLoginResult.TooManyAttempts -> loginResponse { failure = LoginFailure.LOGIN_FAILURE_TOO_MANY_ATTEMPTS }
-            }
-        }
-    }
-
-    override suspend fun createPasskeyLoginOptions(request: CreatePasskeyLoginOptionsRequest): CreatePasskeyLoginOptionsResponse {
-        val client = ClientAuthInterceptor.currentClient()
-        return withContext(ioContext) {
-            createPasskeyLoginOptionsResponse { optionsJson = passkeyService.loginOptions(client) }
-        }
-    }
-
-    override suspend fun loginWithPasskey(request: LoginWithPasskeyRequest): LoginResponse {
-        val client = ClientAuthInterceptor.currentClient()
-        return withContext(ioContext) {
-            val userId = passkeyService.login(client = client, credentialJson = request.credentialJson)
-            if (userId == null) {
-                loginResponse { failure = LoginFailure.LOGIN_FAILURE_NOT_ACCEPTED }
-            } else {
-                successResponse(client, userId)
+            val issued =
+                authorizationService.exchange(
+                    clientId = client.id,
+                    code = request.code,
+                    redirectUri = request.redirectUri,
+                    codeVerifier = request.codeVerifier,
+                )
+            val claims = issued?.let { tokenService.verifyLoginToken(token = it.token, clientId = client.id) }
+            exchangeAuthorizationCodeResponse {
+                if (issued != null && claims != null) {
+                    token =
+                        loginToken {
+                            token = issued.token
+                            expiresAtEpochMillis = issued.expiresAt.toEpochMilli()
+                        }
+                    user = claims.toProto()
+                }
             }
         }
     }
 
     override suspend fun verifyLoginToken(request: VerifyLoginTokenRequest): VerifyLoginTokenResponse {
         val client = ClientAuthInterceptor.currentClient()
-        val claims = loginTokenService.verify(token = request.token, clientId = client.id)
+        val claims = tokenService.verifyLoginToken(token = request.token, clientId = client.id)
         return verifyLoginTokenResponse {
-            if (claims != null) {
-                user =
-                    authenticatedUser {
-                        userId = claims.userId.value
-                        username = claims.username
-                    }
-            }
+            if (claims != null) user = claims.toProto()
         }
     }
 
-    override suspend fun getJwks(request: GetJwksRequest): GetJwksResponse = getJwksResponse { jwksJson = loginTokenService.publicJwkSetJson }
+    override suspend fun getJwks(request: GetJwksRequest): GetJwksResponse = getJwksResponse { jwksJson = tokenService.publicJwkSetJson }
 
-    private fun successResponse(
-        client: RegisteredClient,
-        userId: UserId,
-    ): LoginResponse {
-        val user = checkNotNull(userRepository.findById(userId)) { "ログインしたユーザーがいない" }
-        val issued = loginTokenService.issue(userId = user.id, username = user.username, clientId = client.id)
-        return loginResponse {
-            token =
-                loginToken {
-                    token = issued.token
-                    expiresAtEpochMillis = issued.expiresAt.toEpochMilli()
-                }
+    private fun TokenClaims.toProto(): AuthenticatedUser =
+        authenticatedUser {
+            userId = this@toProto.userId.value
+            username = this@toProto.username
         }
-    }
 }

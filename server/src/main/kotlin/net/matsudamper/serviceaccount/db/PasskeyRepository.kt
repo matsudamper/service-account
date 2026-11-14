@@ -6,7 +6,6 @@ import java.time.Instant
 data class StoredPasskey(
     val credentialId: String,
     val userId: UserId,
-    val rpId: String,
     val attestedCredentialData: ByteArray,
     val signCount: Long,
 )
@@ -14,7 +13,6 @@ data class StoredPasskey(
 data class PasskeySummary(
     val credentialId: String,
     val name: String,
-    val rpId: String,
     val createdAt: Instant,
     val lastUsedAt: Instant?,
 )
@@ -33,7 +31,6 @@ class PasskeyRepository(
      */
     fun add(
         userId: UserId,
-        rpId: String,
         credentialId: String,
         attestedCredentialData: ByteArray,
         signCount: Long,
@@ -44,39 +41,33 @@ class PasskeyRepository(
             connection
                 .prepareStatement(
                     """
-                    INSERT INTO passkeys (credential_id, user_id, rp_id, attested_credential_data, sign_count, name, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (credential_id) DO NOTHING
+                    INSERT INTO passkeys (credential_id, user_id, attested_credential_data, sign_count, name, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (credential_id) DO NOTHING
                     """.trimIndent(),
                 ).use { statement ->
                     statement.setString(1, credentialId)
                     statement.setLong(2, userId.value)
-                    statement.setString(3, rpId)
-                    statement.setBytes(4, attestedCredentialData)
-                    statement.setLong(5, signCount)
-                    statement.setString(6, name)
-                    statement.setLong(7, createdAt.toEpochMilli())
+                    statement.setBytes(3, attestedCredentialData)
+                    statement.setLong(4, signCount)
+                    statement.setString(5, name)
+                    statement.setLong(6, createdAt.toEpochMilli())
                     statement.executeUpdate() > 0
                 }
         }
 
-    fun find(
-        credentialId: String,
-        rpId: String,
-    ): StoredPasskey? =
+    fun find(credentialId: String): StoredPasskey? =
         database.read { connection ->
             connection
-                .prepareStatement("SELECT credential_id, user_id, rp_id, attested_credential_data, sign_count FROM passkeys WHERE credential_id = ? AND rp_id = ?")
+                .prepareStatement("SELECT credential_id, user_id, attested_credential_data, sign_count FROM passkeys WHERE credential_id = ?")
                 .use { statement ->
                     statement.setString(1, credentialId)
-                    statement.setString(2, rpId)
                     statement.executeQuery().use { result ->
                         if (result.next()) {
                             StoredPasskey(
                                 credentialId = result.getString(1),
                                 userId = UserId(result.getLong(2)),
-                                rpId = result.getString(3),
-                                attestedCredentialData = result.getBytes(4),
-                                signCount = result.getLong(5),
+                                attestedCredentialData = result.getBytes(3),
+                                signCount = result.getLong(4),
                             )
                         } else {
                             null
@@ -88,7 +79,7 @@ class PasskeyRepository(
     fun passkeys(userId: UserId): List<PasskeySummary> =
         database.read { connection ->
             connection
-                .prepareStatement("SELECT credential_id, name, rp_id, created_at, last_used_at FROM passkeys WHERE user_id = ? ORDER BY created_at")
+                .prepareStatement("SELECT credential_id, name, created_at, last_used_at FROM passkeys WHERE user_id = ? ORDER BY created_at")
                 .use { statement ->
                     statement.setLong(1, userId.value)
                     statement.executeQuery().use { result ->
@@ -99,14 +90,10 @@ class PasskeyRepository(
                 }
         }
 
-    fun credentialIds(
-        userId: UserId,
-        rpId: String,
-    ): List<String> =
+    fun credentialIds(userId: UserId): List<String> =
         database.read { connection ->
-            connection.prepareStatement("SELECT credential_id FROM passkeys WHERE user_id = ? AND rp_id = ?").use { statement ->
+            connection.prepareStatement("SELECT credential_id FROM passkeys WHERE user_id = ?").use { statement ->
                 statement.setLong(1, userId.value)
-                statement.setString(2, rpId)
                 statement.executeQuery().use { result ->
                     buildList {
                         while (result.next()) add(result.getString(1))
@@ -176,8 +163,7 @@ class PasskeyRepository(
         PasskeySummary(
             credentialId = getString(1),
             name = getString(2),
-            rpId = getString(3),
-            createdAt = Instant.ofEpochMilli(getLong(4)),
-            lastUsedAt = getLong(5).takeUnless { wasNull() }?.let(Instant::ofEpochMilli),
+            createdAt = Instant.ofEpochMilli(getLong(3)),
+            lastUsedAt = getLong(4).takeUnless { wasNull() }?.let(Instant::ofEpochMilli),
         )
 }

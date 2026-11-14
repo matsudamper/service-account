@@ -63,7 +63,7 @@ class PasswordServiceTest {
         assertEquals(PasswordService.DeletePasswordResult.NoPasskey, fixture.passwordService.delete(userId))
         assertTrue(fixture.passwordService.hasPassword(userId))
 
-        fixture.passkeyRepository.add(userId, "example.com", "credential", byteArrayOf(1), 0, "key", Instant.EPOCH)
+        fixture.passkeyRepository.add(userId, "credential", byteArrayOf(1), 0, "key", Instant.EPOCH)
         assertEquals(PasswordService.DeletePasswordResult.Success, fixture.passwordService.delete(userId))
         assertFalse(fixture.passwordService.hasPassword(userId))
     }

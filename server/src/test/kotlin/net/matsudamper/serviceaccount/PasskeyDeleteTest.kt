@@ -10,8 +10,8 @@ class PasskeyDeleteTest {
     fun パスワードが無いとき最後のパスキーは消さない() {
         val fixture = TestFixture()
         val userId = fixture.addUser()
-        fixture.passkeyRepository.add(userId, "example.com", "first", byteArrayOf(1), 0, "first", Instant.EPOCH)
-        fixture.passkeyRepository.add(userId, "example.com", "second", byteArrayOf(1), 0, "second", Instant.EPOCH)
+        fixture.passkeyRepository.add(userId, "first", byteArrayOf(1), 0, "first", Instant.EPOCH)
+        fixture.passkeyRepository.add(userId, "second", byteArrayOf(1), 0, "second", Instant.EPOCH)
         fixture.passwordService.delete(userId)
 
         assertEquals(PasskeyDeleteResult.Success, fixture.passkeyService.delete(userId, "first"))
@@ -23,7 +23,7 @@ class PasskeyDeleteTest {
         val fixture = TestFixture()
         val alice = fixture.addUser("alice")
         val bob = fixture.addUser("bob")
-        fixture.passkeyRepository.add(alice, "example.com", "alice-key", byteArrayOf(1), 0, "key", Instant.EPOCH)
+        fixture.passkeyRepository.add(alice, "alice-key", byteArrayOf(1), 0, "key", Instant.EPOCH)
 
         assertEquals(PasskeyDeleteResult.NotFound, fixture.passkeyService.delete(bob, "alice-key"))
         assertEquals(PasskeyDeleteResult.Success, fixture.passkeyService.delete(alice, "alice-key"))

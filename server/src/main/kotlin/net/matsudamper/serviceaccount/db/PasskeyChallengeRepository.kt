@@ -19,45 +19,40 @@ class PasskeyChallengeRepository(
     fun add(
         challenge: String,
         purpose: PasskeyChallengePurpose,
-        clientId: String,
         userId: UserId?,
         expiresAt: Instant,
     ) {
         database.transaction { connection ->
-            connection.prepareStatement("INSERT INTO passkey_challenges (challenge, purpose, client_id, user_id, expires_at) VALUES (?, ?, ?, ?, ?)").use { statement ->
+            connection.prepareStatement("INSERT INTO passkey_challenges (challenge, purpose, user_id, expires_at) VALUES (?, ?, ?, ?)").use { statement ->
                 statement.setString(1, challenge)
                 statement.setString(2, purpose.name)
-                statement.setString(3, clientId)
-                if (userId == null) statement.setNull(4, java.sql.Types.INTEGER) else statement.setLong(4, userId.value)
-                statement.setLong(5, expiresAt.toEpochMilli())
+                if (userId == null) statement.setNull(3, java.sql.Types.INTEGER) else statement.setLong(3, userId.value)
+                statement.setLong(4, expiresAt.toEpochMilli())
                 statement.executeUpdate()
             }
         }
     }
 
     /**
-     * 期限内のものを消し、[purpose]・[clientId]・[userId] も一致していれば true
+     * 期限内のものを消し、[purpose] と [userId] も一致していれば true
      */
     fun consume(
         challenge: String,
         purpose: PasskeyChallengePurpose,
-        clientId: String,
         userId: UserId?,
         now: Instant,
     ): Boolean =
         database.transaction { connection ->
             connection
-                .prepareStatement("DELETE FROM passkey_challenges WHERE challenge = ? RETURNING purpose, client_id, user_id, expires_at")
+                .prepareStatement("DELETE FROM passkey_challenges WHERE challenge = ? RETURNING purpose, user_id, expires_at")
                 .use { statement ->
                     statement.setString(1, challenge)
                     statement.executeQuery().use { result ->
                         if (!result.next()) return@transaction false
                         val storedPurpose = result.getString(1)
-                        val storedClientId = result.getString(2)
-                        val storedUserId = result.getLong(3).takeUnless { result.wasNull() }
-                        val expiresAt = result.getLong(4)
+                        val storedUserId = result.getLong(2).takeUnless { result.wasNull() }
+                        val expiresAt = result.getLong(3)
                         storedPurpose == purpose.name &&
-                            storedClientId == clientId &&
                             storedUserId == userId?.value &&
                             expiresAt > now.toEpochMilli()
                     }
