@@ -1,0 +1,15 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+*.iml
+.idea/
+out/
+local.properties
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# ローカルで作る SQLite と設定
+/data/
